@@ -1,0 +1,23 @@
+name: Public payload guard
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan every reachable commit tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-list --all > "$RUNNER_TEMP/release-commits.txt"
+          test -s "$RUNNER_TEMP/release-commits.txt"
+          while IFS= read -r commit; do
+            python3 scripts/release_guard.py --tree "$commit"
+          done < "$RUNNER_TEMP/release-commits.txt"

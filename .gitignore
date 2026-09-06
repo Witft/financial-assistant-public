@@ -1,0 +1,48 @@
+# Backend / Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Frontend / Node
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Release artifacts
+backend/frontend_dist/
+release/
+dist/
+*.zip
+*.tar.gz
+*.tgz
+
+# Logs and local data
+*.log
+logs/
+data/
+uploads/
+*.sqlite
+*.sqlite3
+*.db
+
+# Eval runner outputs
+evals/bill-classification-v1/reports/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/settings.json
+
+.claude

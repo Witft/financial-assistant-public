@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+pydantic
+openai
+python-dotenv
+python-multipart
+openpyxl
+xlrd>=2.0.1
+psycopg[binary]
+
+# 测试依赖
+pytest
+httpx
+mcp>=1.29,<2.0
