@@ -1,7 +1,7 @@
 # Exact public release inventory. Format: source path<TAB>archive path<TAB>SHA-256.
 # Source paths are candidate-relative, hash-pinned, and must be regular files; no globbing.
 .env.example	.env.example	b08b498e18cb55ea2720855ddb67f0d53510718d0ebccea3321bfc0d6ee3a086
-README.md	README.md	d5ea0227d2ef9a88cc50263371ffb171523d2909b56f6f1311817cbf28ebdfe9
+README.md	README.md	253e87812a86c76da31a99dc036e6374912a3190d0d10f635762c2390375dd6d
 backend/.env.example	backend/.env.example	1752d861a7c5c3e110a67b94a2e6008c886f3ba513f6f340bae1b78490e90c7f
 backend/.gitignore	backend/.gitignore	fc2cdd2ed4c03308fd92eb30123bda03f941bdb71773bf81f7f80dacd4e194d6
 backend/CHANGELOG.md	backend/CHANGELOG.md	0fd614eef0f178232d7fefedf380f9923e2606a591420b3706ef9e0f765a47f5

@@ -1,8 +1,8 @@
 # Financial Assistant｜支持 API / MCP 接入的个人财务管理系统
 
-这是从已提交版本整理出的**公开候选版**，不携带原 Git 历史。包含 FastAPI 后端、Vue/Vite 前端、业务测试及部分说明文档；不包含 Durable Agent Runtime、原始线上 Trace 或个人部署配置。
+这是从已提交版本整理出的**公开源码快照**，不携带原 Git 历史。包含 FastAPI 后端、Vue/Vite 前端、业务测试及部分说明文档；不包含 Durable Agent Runtime、原始线上 Trace 或个人部署配置。
 
-**未获发布批准（no publication clearance）：** 本 README 不能代替最终公开载荷审查或发布决定。私有原始 gold 语料已排除；分类评估只使用新的、确定性的 23 条公开合成用例，见 `evals/bill-classification-v1/SYNTHETIC_CORPUS.md`。该替换的来源与再生性已验证，但不构成发布许可。
+**公开源码快照：** 本仓库已完成公开载荷审阅并获准发布，不包含原私有 Git 历史或私有原始 gold 语料。分类评估使用新的、确定性的 23 条公开合成用例，见 `evals/bill-classification-v1/SYNTHETIC_CORPUS.md`。源码公开不等于生产部署就绪；测试与 Eval 仅证明其各自声明的验证范围。
 
 ## 项目范围
 

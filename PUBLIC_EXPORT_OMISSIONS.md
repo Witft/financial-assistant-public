@@ -12,4 +12,4 @@ The current corpus replacement was verified under fresh isolation: the backend s
 
 Evaluation reports are local diagnostic postprocess artifacts generated after the evaluation run. They are not live traces, do not establish online-model behavior, and do not substitute for a payload review.
 
-Browser, live database, live-provider, and final public-payload review were not performed by this verification. This candidate has **no publication clearance**.
+Browser, live database, live-provider, and final public-payload review were not performed by this verification. This verification alone did not grant publication clearance; the source snapshot was subsequently reviewed and authorized for publication. Publication does not establish production readiness.
