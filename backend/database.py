@@ -17,60 +17,8 @@ from datetime import datetime
 from typing import Any, Iterable
 
 
-CREATE_TRANSACTIONS_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS transactions (
-    id TEXT PRIMARY KEY,
-    transaction_date DATE NOT NULL,
-    amount NUMERIC(14, 2) NOT NULL,
-    category TEXT NOT NULL,
-    description TEXT NOT NULL,
-    source TEXT NOT NULL,
-    type TEXT NOT NULL CHECK (type IN ('expense', 'income', 'transfer')),
-    transaction_type TEXT,
-    confidence DOUBLE PRECISION,
-    requires_human_review BOOLEAN NOT NULL DEFAULT FALSE,
-    raw_data JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-"""
-
-CREATE_IMPORT_JOBS_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS import_jobs (
-    id TEXT PRIMARY KEY,
-    status TEXT NOT NULL CHECK (status IN ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'REVIEW_REQUIRED')),
-    source TEXT NOT NULL DEFAULT 'unknown',
-    filename TEXT NOT NULL,
-    total_transactions INTEGER NOT NULL DEFAULT 0,
-    review_required_count INTEGER NOT NULL DEFAULT 0,
-    persisted_count INTEGER NOT NULL DEFAULT 0,
-    error_message TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    started_at TIMESTAMPTZ,
-    finished_at TIMESTAMPTZ,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-"""
-
-CREATE_IMPORT_JOB_RUNS_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS import_job_runs (
-    id TEXT PRIMARY KEY,
-    job_id TEXT NOT NULL REFERENCES import_jobs(id) ON DELETE CASCADE,
-    step TEXT NOT NULL,
-    final_status TEXT NOT NULL CHECK (final_status IN ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'REVIEW_REQUIRED')),
-    input_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
-    model_version TEXT,
-    output_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
-    error_message TEXT,
-    retry_count INTEGER NOT NULL DEFAULT 0,
-    started_at TIMESTAMPTZ,
-    finished_at TIMESTAMPTZ,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-"""
-
 UPSERT_TRANSACTION_SQL = """
-INSERT INTO transactions (
+INSERT INTO public.transactions (
     id,
     transaction_date,
     amount,
@@ -110,7 +58,7 @@ ON CONFLICT (id) DO UPDATE SET
 """
 
 UPDATE_TRANSACTION_CATEGORY_SQL = """
-UPDATE transactions
+UPDATE public.transactions
 SET
     category = %(category)s,
     confidence = %(confidence)s,
@@ -126,7 +74,7 @@ WHERE id = %(transaction_id)s;
 """
 
 INSERT_IMPORT_JOB_SQL = """
-INSERT INTO import_jobs (
+INSERT INTO public.import_jobs (
     id,
     status,
     source,
@@ -142,7 +90,7 @@ INSERT INTO import_jobs (
 """
 
 UPDATE_IMPORT_JOB_STATUS_SQL = """
-UPDATE import_jobs
+UPDATE public.import_jobs
 SET
     status = %(status)s,
     updated_at = NOW(),
@@ -151,7 +99,7 @@ WHERE id = %(job_id)s;
 """
 
 FINALIZE_IMPORT_JOB_SQL = """
-UPDATE import_jobs
+UPDATE public.import_jobs
 SET
     status = %(status)s,
     total_transactions = %(total_transactions)s,
@@ -165,7 +113,7 @@ WHERE id = %(job_id)s;
 """
 
 INSERT_IMPORT_JOB_RUN_SQL = """
-INSERT INTO import_job_runs (
+INSERT INTO public.import_job_runs (
     id,
     job_id,
     step,
@@ -191,7 +139,7 @@ INSERT INTO import_job_runs (
 """
 
 FINALIZE_IMPORT_JOB_RUN_SQL = """
-UPDATE import_job_runs
+UPDATE public.import_job_runs
 SET
     step = %(step)s,
     final_status = %(final_status)s,
@@ -290,7 +238,6 @@ def save_transactions(transactions: Iterable[dict[str, Any]]) -> int:
 
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(CREATE_TRANSACTIONS_TABLE_SQL)
             for record in records:
                 db_record = dict(record)
                 db_record["raw_data"] = _json_adapter(db_record["raw_data"])
@@ -312,7 +259,6 @@ def create_import_job(*, filename: str, source: str = "unknown") -> str:
 
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(CREATE_IMPORT_JOBS_TABLE_SQL)
             cur.execute(
                 INSERT_IMPORT_JOB_SQL,
                 {
@@ -347,8 +293,6 @@ def create_import_job_run(
 
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(CREATE_IMPORT_JOBS_TABLE_SQL)
-            cur.execute(CREATE_IMPORT_JOB_RUNS_TABLE_SQL)
             cur.execute(
                 INSERT_IMPORT_JOB_RUN_SQL,
                 {
@@ -386,7 +330,6 @@ def finalize_import_job_run(
 
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(CREATE_IMPORT_JOB_RUNS_TABLE_SQL)
             cur.execute(
                 FINALIZE_IMPORT_JOB_RUN_SQL,
                 {
@@ -412,7 +355,6 @@ def update_import_job_status(job_id: str, status: str) -> None:
 
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(CREATE_IMPORT_JOBS_TABLE_SQL)
             cur.execute(
                 UPDATE_IMPORT_JOB_STATUS_SQL,
                 {
@@ -444,7 +386,6 @@ def finalize_import_job(
 
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(CREATE_IMPORT_JOBS_TABLE_SQL)
             cur.execute(
                 FINALIZE_IMPORT_JOB_SQL,
                 {
@@ -472,12 +413,10 @@ def complete_import_job_if_review_finished(job_id: str) -> bool:
 
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(CREATE_TRANSACTIONS_TABLE_SQL)
-            cur.execute(CREATE_IMPORT_JOBS_TABLE_SQL)
             cur.execute(
                 """
                 SELECT COUNT(*)
-                FROM transactions
+                FROM public.transactions
                 WHERE COALESCE(raw_data->>'import_job_id', '') = %s
                   AND requires_human_review = TRUE;
                 """,
@@ -489,7 +428,7 @@ def complete_import_job_if_review_finished(job_id: str) -> bool:
 
             cur.execute(
                 """
-                UPDATE import_jobs
+                UPDATE public.import_jobs
                 SET
                     status = 'SUCCEEDED',
                     review_required_count = 0,
@@ -514,7 +453,6 @@ def update_transaction_category(transaction_id: str, category: str, confidence: 
 
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(CREATE_TRANSACTIONS_TABLE_SQL)
             cur.execute(
                 UPDATE_TRANSACTION_CATEGORY_SQL,
                 {
@@ -553,7 +491,6 @@ def get_monthly_summary(month: str) -> dict[str, Any]:
 
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(CREATE_TRANSACTIONS_TABLE_SQL)
             cur.execute(
                 """
                 SELECT
@@ -561,7 +498,7 @@ def get_monthly_summary(month: str) -> dict[str, Any]:
                     COALESCE(SUM(CASE WHEN type = 'expense' THEN -amount ELSE 0 END), 0) AS expense,
                     COALESCE(SUM(CASE WHEN type = 'transfer' THEN amount ELSE 0 END), 0) AS transfer,
                     COUNT(*) AS transaction_count
-                FROM transactions
+                FROM public.transactions
                 WHERE transaction_date >= %s AND transaction_date < %s;
                 """,
                 (start_date, end_date),
@@ -574,7 +511,7 @@ def get_monthly_summary(month: str) -> dict[str, Any]:
                     category,
                     COALESCE(SUM(-amount), 0) AS amount,
                     COUNT(*) AS transaction_count
-                FROM transactions
+                FROM public.transactions
                 WHERE transaction_date >= %s
                   AND transaction_date < %s
                   AND type = 'expense'
@@ -641,7 +578,6 @@ def get_transactions(
 
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(CREATE_TRANSACTIONS_TABLE_SQL)
             cur.execute(
                 f"""
                 SELECT
@@ -656,7 +592,7 @@ def get_transactions(
                     confidence,
                     requires_human_review,
                     COALESCE(raw_data->>'import_job_id', NULL) AS import_job_id
-                FROM transactions
+                FROM public.transactions
                 WHERE {' AND '.join(where_clauses)}
                 ORDER BY transaction_date DESC, updated_at DESC
                 LIMIT %s;
@@ -718,7 +654,6 @@ def get_latest_import_job_run(job_id: str) -> dict[str, Any] | None:
 
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(CREATE_IMPORT_JOB_RUNS_TABLE_SQL)
             cur.execute(
                 """
                 SELECT
@@ -734,7 +669,7 @@ def get_latest_import_job_run(job_id: str) -> dict[str, Any] | None:
                     started_at,
                     finished_at,
                     updated_at
-                FROM import_job_runs
+                FROM public.import_job_runs
                 WHERE job_id = %s
                 ORDER BY started_at DESC, updated_at DESC
                 LIMIT 1;
@@ -775,7 +710,6 @@ def get_latest_import_job() -> dict[str, Any] | None:
 
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(CREATE_IMPORT_JOBS_TABLE_SQL)
             cur.execute(
                 """
                 SELECT
@@ -791,7 +725,7 @@ def get_latest_import_job() -> dict[str, Any] | None:
                     started_at,
                     finished_at,
                     updated_at
-                FROM import_jobs
+                FROM public.import_jobs
                 ORDER BY created_at DESC
                 LIMIT 1;
                 """
@@ -817,7 +751,6 @@ def get_import_job(job_id: str) -> dict[str, Any] | None:
 
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(CREATE_IMPORT_JOBS_TABLE_SQL)
             cur.execute(
                 """
                 SELECT
@@ -833,7 +766,7 @@ def get_import_job(job_id: str) -> dict[str, Any] | None:
                     started_at,
                     finished_at,
                     updated_at
-                FROM import_jobs
+                FROM public.import_jobs
                 WHERE id = %s
                 LIMIT 1;
                 """,
@@ -863,7 +796,7 @@ def get_available_months() -> list[str]:
             cur.execute(
                 """
                 SELECT DISTINCT TO_CHAR(transaction_date, 'YYYY-MM') AS month
-                FROM transactions
+                FROM public.transactions
                 ORDER BY month ASC;
                 """
             )

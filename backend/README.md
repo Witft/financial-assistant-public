@@ -6,7 +6,7 @@
 - 执行本地规则分类 + AI 兜底分类
 - 对外提供 Web API 和 Agent/MCP 可调用的数据接口
 
-另外，当配置 `DATABASE_URL` 时，解析结果会自动 upsert 到 PostgreSQL，供后续月度汇总和交易明细查询使用。
+另外，当配置 `DATABASE_URL` 且已显式初始化 schema 时，解析结果会 upsert 到 PostgreSQL，供后续月度汇总和交易明细查询使用。
 
 ## 当前能力
 
@@ -66,23 +66,33 @@ cp .env.example .env
 - `DEEPSEEK_API_KEY`：启用 AI 分类 / AI 财务诊断
 - `DEEPSEEK_BASE_URL`：可选，默认 `https://api.deepseek.com/v1`
 - `DEEPSEEK_MODEL`：可选，默认 `deepseek-chat`
-- `DATABASE_URL`：可选；配置后 `/api/parse` 会自动写入 PostgreSQL
+- `DATABASE_URL`：可选；配置且 schema 已通过显式初始化后，`/api/parse` 会写入 PostgreSQL
 
 ## 启动方式
 
-### 方式 1：直接运行
+### 无数据库解析模式
 
 ```bash
-python api_server.py
+unset DATABASE_URL DEEPSEEK_API_KEY DEEPSEEK_BASE_URL DEEPSEEK_MODEL
+uvicorn api_server:app --host 127.0.0.1 --port 8000
 ```
 
-### 方式 2：用 uvicorn
+未设置 `DATABASE_URL` 时，`/api/parse` 只返回解析结果，不写入数据库；依赖持久化数据的 Agent 和导入任务查询接口不可用。
+
+### 可丢弃本地 PostgreSQL 持久化模式
+
+只可连接你自行创建的可丢弃、本地、专用测试数据库，不能指向生产、共享或含真实账单的数据库。以下命令必须在 `backend/` 目录执行，且必须先初始化、再启动：
 
 ```bash
-uvicorn api_server:app --reload --host 0.0.0.0 --port 8000
+# 在 backend/ 目录；将示例 DSN 换成你的本地专用测试库，勿提交凭据。
+export DATABASE_URL='postgresql://financial_test_user:***@127.0.0.1:5432/financial_assistant_test'
+python scripts/init_database.py
+uvicorn api_server:app --host 127.0.0.1 --port 8000
 ```
 
-默认地址：
+`python scripts/init_database.py` 是 schema 的显式管理入口。它只会在已存在对象符合当前精确契约时创建缺失表；不会修改不兼容的既有对象。配置 `DATABASE_URL` 后，应用启动只读检查 `transactions`、`import_jobs` 和 `import_job_runs` 是否完全符合契约。缺失或不兼容时启动失败；应用不会在启动、解析或查询期间自动建表、改变表结构或执行迁移。
+
+本地 API 地址：
 
 ```text
 http://localhost:8000
@@ -94,7 +104,7 @@ Swagger 文档：
 http://localhost:8000/docs
 ```
 
-## 持久化行为
+## 持久化行为与 ID
 
 如果没有配置 `DATABASE_URL`：
 
@@ -102,13 +112,14 @@ http://localhost:8000/docs
 - 但不会写入数据库
 - Agent 查询接口不可用
 
-如果配置了 `DATABASE_URL`：
+如果配置了 `DATABASE_URL` 且 schema 初始化、启动检查均成功：
 
 - `/api/parse` 会把交易 upsert 到 PostgreSQL
 - 主键不是外部账单原始 ID，而是基于稳定业务字段生成的哈希 ID
 - 重复上传相同账单时可以保持幂等
+- `/api/parse` 返回的每笔 `transaction.id` 就是该持久化 ID；对应的 `transaction.import_job_id` 与响应顶层 `job_id` 一并用于 `POST /api/transactions/correct`
 
-这部分逻辑在 `database.py`。
+无数据库模式中，parse 返回的 `tx_0` 一类序号只是本次解析的临时 ID，不对应任何持久化行，不能用于持久化纠正。持久化与 schema 契约逻辑分别在 `database.py` 和 `schema.py`；本项目不承诺生产部署就绪。
 
 ## 业务规则
 

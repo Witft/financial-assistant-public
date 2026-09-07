@@ -15,6 +15,22 @@ PACKAGER = CANDIDATE_ROOT / "scripts" / "release_package.py"
 
 
 class ReleasePackageTests(unittest.TestCase):
+    def test_generated_launcher_imports_complete_app_and_binds_loopback(self):
+        import runpy
+        launcher = runpy.run_path(str(PACKAGER))["START_SCRIPT"].decode()
+        self.assertIn("python -m uvicorn api_server:app --host 127.0.0.1 --port 8000", launcher)
+        self.assertNotIn("python api_server.py", launcher)
+
+    def test_runtime_allowlist_contains_explicit_schema_startup_dependencies(self):
+        rows = (CANDIDATE_ROOT / "scripts" / "release-package-allowlist.txt").read_text().splitlines()
+        entries = {row.split("\t")[0]: row.split("\t")[1:] for row in rows if row and not row.startswith("#")}
+        for source in ("backend/schema.py", "backend/scripts/init_database.py"):
+            with self.subTest(source=source):
+                self.assertIn(source, entries, "runtime archive must include schema startup dependencies")
+                target, digest = entries[source]
+                self.assertEqual(target, source)
+                self.assertEqual(digest, hashlib.sha256((CANDIDATE_ROOT / source).read_bytes()).hexdigest())
+
     def test_only_explicit_regular_allowlisted_files_reach_archive(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "fixture"
@@ -41,7 +57,7 @@ class ReleasePackageTests(unittest.TestCase):
             api_hash = digest("print('public')\n")
             html_hash = digest("<main></main>\n")
             js_hash = digest("console.log('public')\n")
-            start_hash = digest('#!/usr/bin/env bash\nset -euo pipefail\ncd "$(dirname "$0")/backend"\npython api_server.py\n')
+            start_hash = digest('#!/usr/bin/env bash\nset -euo pipefail\ncd "$(dirname "$0")/backend"\npython -m uvicorn api_server:app --host 127.0.0.1 --port 8000\n')
             allowlist.write_text(
                 f"README.md\tREADME.md\t{readme_hash}\n"
                 f".env.example\t.env.example\t{env_hash}\n"

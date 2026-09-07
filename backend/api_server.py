@@ -3,6 +3,7 @@ import io
 import json
 import re
 import csv
+from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta
 from typing import List, Optional, Dict, Any
 import httpx
@@ -18,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import database
+import schema
 
 # 加载 .env 文件中的环境变量
 load_dotenv()
@@ -25,7 +27,16 @@ load_dotenv()
 # ==========================================
 # 1. 跨域配置 (CORS)
 # ==========================================
-app = FastAPI(title="Financial Assistant AI API")
+@asynccontextmanager
+async def _application_lifespan(_app: FastAPI):
+    """Validate configured persistence without changing its schema."""
+    database_url = database.get_database_url()
+    if database_url:
+        schema.assert_database_ready(database_url)
+    yield
+
+
+app = FastAPI(title="Financial Assistant AI API", lifespan=_application_lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -1255,10 +1266,17 @@ async def parse_bill(file: UploadFile = File(...)):
         for t in transactions_data:
             t['import_job_id'] = job_id
 
+        database_enabled = database.is_database_enabled()
+        if database_enabled:
+            for t in transactions_data:
+                # The parse response must expose the same stable ID used by the
+                # database upsert so the frontend can submit it for correction.
+                t['id'] = database.build_transaction_record(t)['id']
+
         transactions = []
         for i, t in enumerate(transactions_data):
             transactions.append(ParsedTransaction(
-                id=f"tx_{i}",
+                id=t.get('id') or f"tx_{i}",
                 date=t['date'].split(' ')[0] if ' ' in t['date'] else t['date'],
                 amount=t['amount'],
                 category=t['category'],
@@ -1268,7 +1286,6 @@ async def parse_bill(file: UploadFile = File(...)):
                 import_job_id=t.get('import_job_id'),
             ))
 
-        database_enabled = database.is_database_enabled()
         if database_enabled:
             current_step = 'persist_transactions'
             persisted_count = database.save_transactions(transactions_data)

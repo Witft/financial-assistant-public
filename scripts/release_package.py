@@ -20,7 +20,7 @@ import tarfile
 from pathlib import Path, PurePosixPath
 
 
-START_SCRIPT = b'#!/usr/bin/env bash\nset -euo pipefail\ncd "$(dirname "$0")/backend"\npython api_server.py\n'
+START_SCRIPT = b'#!/usr/bin/env bash\nset -euo pipefail\ncd "$(dirname "$0")/backend"\npython -m uvicorn api_server:app --host 127.0.0.1 --port 8000\n'
 
 
 def fail(message: str) -> None:
