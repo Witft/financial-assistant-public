@@ -15,7 +15,7 @@ from unittest.mock import Mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient
-from api_server import app
+from api_server import app, database
 from tests.fixtures import ALIPAY_SAMPLE, WECHAT_SAMPLE, CCB_XLS_SAMPLE_PATH
 
 client = TestClient(app)
@@ -133,6 +133,48 @@ class TestParseAPI:
         assert persisted_transactions[0]['description'] == '星巴克'
         assert response.json()['message'] == '成功解析 5 笔交易，并已写入数据库 5 笔'
 
+    def test_parse_persisted_transaction_id_can_be_corrected_directly(self, monkeypatch):
+        """持久化解析响应的 ID 必须就是数据库 correction 使用的稳定行 ID。"""
+        persisted_rows = {}
+        corrected_rows = []
+
+        def save_transactions(transactions):
+            for transaction in transactions:
+                record = database.build_transaction_record(transaction)
+                persisted_rows[record['id']] = record
+            return len(transactions)
+
+        def update_transaction_category(transaction_id, category):
+            persisted_rows[transaction_id]['category'] = category
+            corrected_rows.append(transaction_id)
+
+        monkeypatch.setattr('api_server.database.is_database_enabled', lambda: True)
+        monkeypatch.setattr('api_server.save_user_category', lambda description, category: None)
+        monkeypatch.setattr('api_server.database.save_transactions', save_transactions)
+        monkeypatch.setattr('api_server.database.update_transaction_category', update_transaction_category)
+
+        parse_response = client.post(
+            '/api/parse',
+            files={'file': ('alipay.csv', io.BytesIO(ALIPAY_SAMPLE.encode('utf-8')), 'text/csv')},
+        )
+
+        assert parse_response.status_code == 200
+        parsed_transaction = parse_response.json()['transactions'][0]
+        assert parsed_transaction['id'] in persisted_rows
+
+        correction_response = client.post(
+            '/api/transactions/correct',
+            json={
+                'transaction_id': parsed_transaction['id'],
+                'description': parsed_transaction['description'],
+                'category': 'other',
+            },
+        )
+
+        assert correction_response.status_code == 200
+        assert corrected_rows == [parsed_transaction['id']]
+        assert persisted_rows[parsed_transaction['id']]['category'] == 'other'
+
     def test_parse_reports_when_database_is_disabled(self, monkeypatch):
         """未配置 DATABASE_URL 时，/api/parse 应明确提示仅解析未持久化。"""
         monkeypatch.setattr('api_server.database.is_database_enabled', lambda: False)
@@ -143,12 +185,15 @@ class TestParseAPI:
         )
 
         assert response.status_code == 200
-        assert response.json()['message'] == '成功解析 5 笔交易；未配置 DATABASE_URL，当前未写入数据库'
+        data = response.json()
+        assert data['message'] == '成功解析 5 笔交易；未配置 DATABASE_URL，当前未写入数据库'
+        assert data['transactions'][0]['id'] == 'tx_0'
 
     def test_parse_returns_succeeded_import_job_status(self, monkeypatch):
         """无待审核交易时，/api/parse 应返回 SUCCEEDED 的 import job 状态。"""
         create_job_mock = Mock(return_value="job_succeeded_1")
         create_run_mock = Mock(return_value='run_succeeded_1')
+        update_job_status_mock = Mock()
         finalize_run_mock = Mock()
         finalize_job_mock = Mock()
         clean_transactions = [
@@ -177,6 +222,7 @@ class TestParseAPI:
         monkeypatch.setattr('api_server.parse_csv_content', lambda _csv_text: clean_transactions)
         monkeypatch.setattr('api_server.database.create_import_job', create_job_mock, raising=False)
         monkeypatch.setattr('api_server.database.create_import_job_run', create_run_mock, raising=False)
+        monkeypatch.setattr('api_server.database.update_import_job_status', update_job_status_mock, raising=False)
         monkeypatch.setattr('api_server.database.finalize_import_job_run', finalize_run_mock, raising=False)
         monkeypatch.setattr('api_server.database.finalize_import_job', finalize_job_mock, raising=False)
 
@@ -228,6 +274,7 @@ class TestParseAPI:
     def test_parse_returns_job_run_parse_bill_when_database_is_disabled(self, monkeypatch):
         create_job_mock = Mock(return_value="job_succeeded_1")
         create_run_mock = Mock(return_value='run_succeeded_1')
+        update_job_status_mock = Mock()
         finalize_run_mock = Mock()
         finalize_job_mock = Mock()
         clean_transactions = [
@@ -255,6 +302,7 @@ class TestParseAPI:
         monkeypatch.setattr('api_server.parse_csv_content', lambda _csv_text: clean_transactions)
         monkeypatch.setattr('api_server.database.create_import_job', create_job_mock, raising=False)
         monkeypatch.setattr('api_server.database.create_import_job_run', create_run_mock, raising=False)
+        monkeypatch.setattr('api_server.database.update_import_job_status', update_job_status_mock, raising=False)
         monkeypatch.setattr('api_server.database.finalize_import_job_run', finalize_run_mock, raising=False)
         monkeypatch.setattr('api_server.database.finalize_import_job', finalize_job_mock, raising=False)
         
@@ -373,6 +421,7 @@ class TestParseAPI:
         """存在待审核交易时，/api/parse 应返回 REVIEW_REQUIRED 的 import job 状态。"""
         create_job_mock = Mock(return_value="job_review_1")
         create_run_mock = Mock(return_value='run_review_1')
+        update_job_status_mock = Mock()
         finalize_run_mock = Mock()
         finalize_job_mock = Mock()
         review_transactions = [{
@@ -389,6 +438,7 @@ class TestParseAPI:
         monkeypatch.setattr('api_server.parse_csv_content', lambda _csv_text: review_transactions)
         monkeypatch.setattr('api_server.database.create_import_job', create_job_mock, raising=False)
         monkeypatch.setattr('api_server.database.create_import_job_run', create_run_mock, raising=False)
+        monkeypatch.setattr('api_server.database.update_import_job_status', update_job_status_mock, raising=False)
         monkeypatch.setattr('api_server.database.finalize_import_job_run', finalize_run_mock, raising=False)
         monkeypatch.setattr('api_server.database.finalize_import_job', finalize_job_mock, raising=False)
 
@@ -430,11 +480,13 @@ class TestParseAPI:
         """解析异常时，/api/parse 应把 import job 标记为 FAILED。"""
         create_job_mock = Mock(return_value='job_failed_1')
         create_run_mock = Mock(return_value='run_failed_1')
+        update_job_status_mock = Mock()
         finalize_run_mock = Mock()
         finalize_job_mock = Mock()
 
         monkeypatch.setattr('api_server.database.create_import_job', create_job_mock, raising=False)
         monkeypatch.setattr('api_server.database.create_import_job_run', create_run_mock, raising=False)
+        monkeypatch.setattr('api_server.database.update_import_job_status', update_job_status_mock, raising=False)
         monkeypatch.setattr('api_server.database.finalize_import_job_run', finalize_run_mock, raising=False)
         monkeypatch.setattr('api_server.database.finalize_import_job', finalize_job_mock, raising=False)
         monkeypatch.setattr('api_server.parse_csv_content', Mock(side_effect=ValueError('boom')))

@@ -1,8 +1,8 @@
 # Financial Assistant｜支持 API / MCP 接入的个人财务管理系统
 
-这是从已提交版本整理出的**公开源码快照**，不携带原 Git 历史。包含 FastAPI 后端、Vue/Vite 前端、业务测试及部分说明文档；不包含 Durable Agent Runtime、原始线上 Trace 或个人部署配置。
+这是从已提交版本整理出的**公开源码候选快照**，不携带原 Git 历史。包含 FastAPI 后端、Vue/Vite 前端、业务测试及部分说明文档；不包含 Durable Agent Runtime、原始线上 Trace 或个人部署配置。
 
-**公开源码快照：** 本仓库已完成公开载荷审阅并获准发布，不包含原私有 Git 历史或私有原始 gold 语料。分类评估使用新的、确定性的 23 条公开合成用例，见 `evals/bill-classification-v1/SYNTHETIC_CORPUS.md`。源码公开不等于生产部署就绪；测试与 Eval 仅证明其各自声明的验证范围。
+分类评估使用新的、确定性的 23 条公开合成用例，见 `evals/bill-classification-v1/SYNTHETIC_CORPUS.md`。本地验证不构成发布授权或生产部署承诺；测试、Eval 与浏览器验收只证明各自明确说明的范围。
 
 ## 项目范围
 
@@ -71,16 +71,17 @@ export DATABASE_URL='postgresql://financial_test_user:CHANGE_ME@127.0.0.1:5432/f
 
 . backend/.venv/bin/activate
 cd backend
+python scripts/init_database.py
 uvicorn api_server:app --host 127.0.0.1 --port 8000
 ```
 
-应用不会替你建库、建角色或安装 PostgreSQL。连接到已存在的测试库后，首次相关操作以 `CREATE TABLE IF NOT EXISTS` 懒创建 `transactions`、`import_jobs` 与 `import_job_runs`；上传解析会写入交易和导入任务。请在开始前确认 DSN 指向可清空的测试数据库。
+应用不会替你建库、建角色或安装 PostgreSQL。`python scripts/init_database.py` 是唯一会创建缺失应用表的入口：它会先校验已存在对象是否完全符合当前契约，再创建缺失表。应用启动只读校验已配置的 schema；缺表或不兼容的表会导致启动失败，不会在启动、解析或查询时自动建表、修改表或迁移 schema。请在开始前确认 DSN 指向可清空的测试数据库。初始化账号需要创建应用表所需的权限；日常运行可另用仅有所需读写权限的账号。不兼容的旧 schema 会被拒绝，必须另行评估迁移方案，不能把重复执行初始化当作自动迁移。
 
-持久化模式下，重复上传通过由来源、日期、描述、金额和类型计算出的稳定哈希交易 ID 做 upsert。`POST /api/parse` 的返回交易 ID 是本次解析序号（如 `tx_0`），不是持久化行 ID；若要调用 `POST /api/transactions/correct` 同步修改数据库中的交易，先从 `GET /api/agent/transactions?month=YYYY-MM` 取得该行的稳定 `id`，并同时传入对应 `job_id`。直接使用 parse 响应的 `tx_0` 一类 ID 在已启用数据库时不能定位持久化行。
+持久化模式下，重复上传通过由来源、日期、描述、金额和类型计算出的稳定哈希交易 ID 做 upsert。数据库已启用时，`POST /api/parse` 会在写入前把每笔返回交易的 `id` 设为该稳定持久化 ID；该 ID 与 `import_job_id`（也等于响应顶层的 `job_id`）可直接用于 `POST /api/transactions/correct`。无数据库模式的 `tx_0` 一类解析序号不代表持久化行，不能用于持久化纠正。
 
 导入任务处于 `REVIEW_REQUIRED` 时，`review_required_count` 记录的是导入完成时的初始待审核数量；单笔纠正不会逐笔递减。全部待审核交易清除后，任务转为 `SUCCEEDED`，该字段才重置为 0。
 
-已记录的持久化证据仅覆盖真实 FastAPI `TestClient`：公开 `ccb_sample.xls` 写入 PostgreSQL、查询接口返回持久化数据、用查询到的稳定 ID 完成一次纠正，并在新的 Python 进程/新 `TestClient` 中重启后仍能读到该数据。它不等同于“前端已在 PostgreSQL 模式完成端到端浏览器验收”；该浏览器验收尚未声明通过。
+当前浏览器验收记录了两次连续、隔离的真实 PostgreSQL/浏览器运行均通过（每次均为 1 个 Playwright 测试）。两次运行都上传公开 `ccb_sample.xls` 的 12 笔交易，使用 parse 响应中的持久化 ID 完成纠正，随后 reload、启动新的后端进程并直接查询 PostgreSQL 以确认数据仍存在；该测试没有拦截或 mock API，且保留 HTTP 错误与控制台错误断言；持久化证据另由真实 PostgreSQL 查询核对。这是该工作树快照的浏览器证据，不是永久环境修复、生产适用性或发布授权。
 
 ## 测试、Eval 与合成语料生成
 
@@ -88,9 +89,11 @@ uvicorn api_server:app --host 127.0.0.1 --port 8000
 
 ```bash
 . backend/.venv/bin/activate
+unset DATABASE_URL SCHEMA_POSTGRES_TEST_DSN DEEPSEEK_API_KEY DEEPSEEK_BASE_URL DEEPSEEK_MODEL
 python evals/bill-classification-v1/generate_synthetic_cases.py
 python backend/scripts/run_bill_classification_eval.py
 python -m pytest backend
+python -m unittest discover -s scripts/tests -p test_release_package.py
 
 cd frontend
 npm test
@@ -98,10 +101,28 @@ npm run build
 cd ..
 ```
 
-最近记录的隔离验证结果为：分类 Eval 23/23 通过；后端 `pytest` 为 167 passed、1 warning；前端 Vitest 为 22/22 通过，生产构建通过。该记录不证明在线模型、生产部署或真实数据库浏览器流程。
+本次候选版在凭据清空、外网阻断及全新专用 PostgreSQL 环境下复验：后端 205 passed，打包测试 7 passed；合并运行输出为 `212 passed, 1 warning, 4 subtests passed`（subtests 不额外算作主测试）。公开合成分类 Eval 为 23/23 通过；前端 Vitest 为 22/22 通过，构建通过。后端有一个既有弃用警告，构建有大 chunk 提示；这些结果不证明在线模型或生产部署。较早的 167 passed 仅属于历史验证，不能与本轮总计合并。
+
+普通测试命令不启用真实 PostgreSQL schema 测试。`SCHEMA_POSTGRES_TEST_DSN` 是该集成测试的单独开关：测试会反复执行 `DROP SCHEMA public CASCADE` 并创建测试角色，**只能指向全新、可丢弃的隔离测试实例**，绝不能复用应用数据库、共享库或生产库。未设置该变量时，这组测试会跳过；这不等于通过完整 PostgreSQL 验收。
+
+## 运行时归档包（与源码 checkout 分开）
+
+运行时归档包是单独的、较窄的部署载荷：其中包含已构建的前端静态文件、后端运行依赖声明、`schema.py` 和初始化脚本；不包含前端源码或 npm 项目，也不包含 `evals/` 的语料与生成器。因此不要在归档包内执行前端 `npm` 命令或 Eval 命令；这些命令只适用于源码 checkout。
+
+解压归档包后，在其根目录创建 Python 环境并安装归档中提供的后端依赖：
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r backend/requirements.txt
+unset DATABASE_URL DEEPSEEK_API_KEY DEEPSEEK_BASE_URL DEEPSEEK_MODEL
+bash start.sh
+```
+
+归档包的 `start.sh` 以 loopback 地址启动 `python -m uvicorn api_server:app --host 127.0.0.1 --port 8000`，并服务已构建的前端。若要使用持久化，只能先为可丢弃的本地专用 PostgreSQL 设置 `DATABASE_URL`，然后在同一已激活环境中运行 `python backend/scripts/init_database.py`，最后执行 `bash start.sh`。该显式初始化和 fail-closed schema 契约与源码模式相同。
 
 ## AI 协作边界
 
 该候选版记录的工作范围包括业务问题定义、关键设计、安全边界、测试/Eval 验收、核心代码阅读、审查与迭代决策；实现采用 AI 协作。生成的代码产物不自动等同于独立掌握的全部能力。
 
-完整导出清单见 [PUBLIC_EXPORT_MANIFEST.md](PUBLIC_EXPORT_MANIFEST.md)，排除项与验证限制见 [PUBLIC_EXPORT_OMISSIONS.md](PUBLIC_EXPORT_OMISSIONS.md)。
+[PUBLIC_EXPORT_MANIFEST.md](PUBLIC_EXPORT_MANIFEST.md) 仅列出公开评估资产及其验证范围，并非完整公开载荷清单；排除项与验证限制见 [PUBLIC_EXPORT_OMISSIONS.md](PUBLIC_EXPORT_OMISSIONS.md)。
